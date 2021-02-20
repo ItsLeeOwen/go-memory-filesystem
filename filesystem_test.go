@@ -27,8 +27,9 @@ var expectPrettyPrint string = `{
   }
 }`
 
+type test = func(fs FileSystem) bool
+
 func TestFileSystem(t *testing.T) {
-	type test = func(fs FileSystem) bool
 
 	var tests = func() []test {
 		return []test{
