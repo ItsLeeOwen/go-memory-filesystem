@@ -40,7 +40,7 @@ log.Println(contents)
 //     "foo": {
 //       "bar": {
 //         "baz": {
-//           "hello.txt": "World.World. 💖 💖 💖 "
+//           "hello.txt": "World. 💖 💖 💖 "
 //         }
 //       }
 //     }
