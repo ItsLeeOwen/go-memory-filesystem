@@ -1,7 +1,8 @@
 ## In Memory Filesystem in Go implemented as a Trie
 
-go test .
-
+```go
+go test -v .
+```
 
 ```go
 
@@ -15,20 +16,23 @@ if err := fs.WriteFile("/foo/bar/baz/hello.txt", "World."); err != nil {
     log.Fatal(err)
 }
 
-contents, err := fs.ReadFile("/foo/bar/baz/hello.txt")
-if err != nil {
+if contents, err := fs.ReadFile("/foo/bar/baz/hello.txt"); err != nil {
     log.Fatal(err)
+} else {
+    // World.
+    log.Println(contents)
 }
-
-// World.
-log.Println(contents)
 
 if err := fs.WriteFile("/foo/bar/baz/hello.txt", " 💖 💖 💖 "); err != nil {
     log.Fatal(err)
 }
 
-// World. 💖 💖 💖
-log.Println(contents)
+if contents, err := fs.ReadFile("/foo/bar/baz/hello.txt"); err != nil {
+    log.Fatal(err)
+} else {
+    // World. 💖 💖 💖
+    log.Println(contents)
+}
 
 // {
 //   "": {
@@ -43,5 +47,4 @@ log.Println(contents)
 //   }
 // }
 fmt.Println(fs.PrettyPrint())
-
 ```
