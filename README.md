@@ -7,10 +7,6 @@ go test .
 
 fs := NewFileSystem()
 
-if err := fs.Mkdir("/foo"); err != nil {
-    log.Fatal(err)
-}
-
 if err := fs.Mkdir("/alo"); err != nil {
     log.Fatal(err)
 }
