@@ -347,8 +347,6 @@ func (d *dir) PrettyPrint() map[string]interface{} {
 			m[fmt.Sprint(key)] = d.PrettyPrint()
 		} else if f, ok := value.(File); ok {
 			m[fmt.Sprint(key)] = f.Data()
-		} else {
-			fmt.Println("wtf is this?", value)
 		}
 		return true
 	})
