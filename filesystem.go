@@ -1,46 +1,99 @@
 package filesystem
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 )
 
-// FileSystemer is the interface for reading/writing data to an in-memory filesystem
-type FileSystemer interface {
+// FileSystem is the interface for reading/writing data to an in-memory filesystem
+type FileSystem interface {
 	Mkdir(string) error
-	WriteFile(string, string) error
+	PrettyPrint() (string, error)
 	ReadFile(string) (string, error)
+	WriteFile(string, string) error
 }
 
-// NewFileSystem returns a FileSystemer
-func NewFileSystem() FileSystemer {
-	nodes := &sync.Map{}
-	nodes.Store("", &dir{
-		name:  "",
-		nodes: &sync.Map{},
-	})
+// Dir interface for traversing & creating child Nodes
+type Dir interface {
+	Node
+	CreateDir(name string) (Dir, error)
+	CreateFile(name string, data string) error
+	CreatePath(path []string) (Dir, error)
+	GetChild(name string) (Node, error)
+	Find(path []string) (Node, error)
+	HasChild(name string) bool
+	PrettyPrint() map[string]interface{}
+}
+
+// File interface for reading/writing a File Node
+type File interface {
+	Node
+	Append(data string)
+	Data() string
+}
+
+// Node is the interface grouping common functionality between File & Dir types
+type Node interface {
+	Name() string
+}
+
+// NewFileSystem returns a FileSystem
+func NewFileSystem(opts ...FileSystemOption) FileSystem {
+	opt := fileSystemOptions{}
+	for _, o := range opts {
+		opt = o(opt)
+	}
 
 	return &fileSystem{
-		root: &dir{
-			name:  "CoinbaseHD",
-			nodes: nodes,
+		dir: &dir{
+			name:  "",
+			nodes: &sync.Map{},
+			opt:   &opt,
 		},
 	}
 }
 
+type FileSystemOption func(o fileSystemOptions) fileSystemOptions
+
+// DisablePFlag will not auto-generate non-existent
+// sub-directories leading up to the given directory
+// in Mkdir or WriteFile calls
+func DisablePFlag() FileSystemOption {
+	return func(opt fileSystemOptions) fileSystemOptions {
+		opt.pFlagDisabled = true
+		return opt
+	}
+}
+
+type fileSystemOptions struct {
+	// see DisablePFlag
+	pFlagDisabled bool
+}
+
 // fileSystem implements FileSystemer
 type fileSystem struct {
-	root Dir
+	*dir
 }
 
 // Mkdir creates a directory at path or returns
 // an err if the path is incomplete
 func (fs fileSystem) Mkdir(path string) error {
 	segments, segmentsLen := fs.parsePathSegments(path)
-	parentPath := segments[:segmentsLen-1]
 
-	parent, err := fs.root.Find(parentPath)
+	var err error
+	var parent Node
+
+	if !fs.opt.pFlagDisabled {
+		_, err = fs.CreatePath(segments)
+		return err
+	}
+
+	parentPath := segments[:segmentsLen-1]
+	parent, err = fs.Find(parentPath)
+
 	if err != nil {
 		return err
 	}
@@ -53,11 +106,28 @@ func (fs fileSystem) Mkdir(path string) error {
 	dirName := segments[segmentsLen-1]
 
 	// add child or return err
-	if err := parentDir.CreateDir(dirName); err != nil {
+	if _, err := parentDir.CreateDir(dirName); err != nil {
 		return fmt.Errorf("error adding child dir %s: %w", path, err)
 	}
 
 	return nil
+}
+
+// Readfile returns data in a file or error
+func (fs fileSystem) ReadFile(path string) (string, error) {
+	segments := strings.Split(path, "/")
+
+	node, err := fs.Find(segments)
+	if err != nil {
+		return "", err
+	}
+
+	file, isFile := node.(File)
+	if !isFile {
+		return "", fmt.Errorf("error reading non-file: %s", path)
+	}
+
+	return file.Data(), nil
 }
 
 // WriteFile creates a file if it doesn't exist
@@ -66,7 +136,15 @@ func (fs fileSystem) WriteFile(path string, data string) error {
 	segments, segmentsLen := fs.parsePathSegments(path)
 	parentPath := segments[:segmentsLen-1]
 
-	parent, err := fs.root.Find(parentPath)
+	var err error
+	var parent Node
+
+	if !fs.opt.pFlagDisabled {
+		parent, err = fs.CreatePath(parentPath)
+	} else {
+		parent, err = fs.Find(parentPath)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -98,21 +176,15 @@ func (fs fileSystem) WriteFile(path string, data string) error {
 	return nil
 }
 
-// Readfile returns data in a file or error
-func (fs fileSystem) ReadFile(path string) (string, error) {
-	segments := strings.Split(path, "/")
+func (fs fileSystem) PrettyPrint() (string, error) {
+	m := fs.dir.PrettyPrint()
 
-	node, err := fs.root.Find(segments)
+	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return "", err
 	}
 
-	file, isFile := node.(File)
-	if !isFile {
-		return "", fmt.Errorf("error reading non-file: %s", path)
-	}
-
-	return file.Data(), nil
+	return string(b), nil
 }
 
 // parsePathSegments helper func to return info from path string
@@ -120,28 +192,6 @@ func (fs fileSystem) parsePathSegments(path string) (segments []string, segments
 	segments = strings.Split(path, "/")
 	segmentsLen = len(segments)
 	return
-}
-
-// Node is the interface grouping common functionality between File & Dir types
-type Node interface {
-	Name() string
-}
-
-// Dir interface for traversing & creating child Nodes
-type Dir interface {
-	Node
-	CreateDir(name string) error
-	CreateFile(name string, data string) error
-	Find(path []string) (Node, error)
-	GetChild(name string) (Node, error)
-	HasChild(name string) bool
-}
-
-// File interface for reading/writing a File Node
-type File interface {
-	Node
-	Append(data string)
-	Data() string
 }
 
 // file implements File
@@ -167,6 +217,7 @@ func (f *file) Name() string {
 
 // dir implements Dir
 type dir struct {
+	opt   *fileSystemOptions
 	name  string
 	nodes *sync.Map
 }
@@ -178,17 +229,20 @@ func (d *dir) Name() string {
 
 // CreateDir creates a child directory,
 // returns an error if the dirname already exists
-func (d *dir) CreateDir(name string) error {
+func (d *dir) CreateDir(name string) (Dir, error) {
 	if d.HasChild(name) {
-		return fmt.Errorf("%s dir already exists", name)
+		return nil, fmt.Errorf("%s dir already exists", name)
 	}
 
-	d.nodes.Store(name, &dir{
+	dir := &dir{
 		name:  name,
 		nodes: &sync.Map{},
-	})
+		opt:   d.opt,
+	}
 
-	return nil
+	d.nodes.Store(name, dir)
+
+	return dir, nil
 }
 
 // CreateFile creates a child file,
@@ -206,16 +260,74 @@ func (d *dir) CreateFile(name string, data string) error {
 	return nil
 }
 
+// CreatePath walks the Trie creating any missing directories
+// & returns the final Dir or error
+func (d *dir) CreatePath(path []string) (Dir, error) {
+	name := path[0]
+
+	child, err := d.GetChild(name)
+
+	if err != nil {
+		if !errors.Is(err, PathNotFoundError) {
+			return nil, err
+		}
+
+		if child, err = d.CreateDir(name); err != nil {
+			return nil, err
+		}
+	}
+
+	// Node must be a Dir
+	childDir, isDir := child.(Dir)
+	if !isDir {
+		return nil, fmt.Errorf("path is invalid: %s", path)
+	}
+
+	if len(path) == 1 {
+		// return the final Dir
+		return childDir, nil
+	}
+
+	// shift one from front of the path
+	// and continue finding the next Node
+	return childDir.CreatePath(path[1:])
+}
+
 // GetChild returns child by name
 // returns an error if the child does not exist
 func (d *dir) GetChild(name string) (Node, error) {
 	child, exists := d.nodes.Load(name)
 
 	if !exists {
-		return nil, fmt.Errorf("child does not exist: %s", name)
+		return nil, NewPathNotFoundError([]string{name})
 	}
 
 	return child.(Node), nil
+}
+
+// Find walks the Trie & returns a final Node or error
+func (d *dir) Find(path []string) (Node, error) {
+	name := path[0]
+
+	child, err := d.GetChild(name)
+	if err != nil {
+		return nil, NewPathNotFoundError(path)
+	}
+
+	if len(path) == 1 {
+		// return the final Node
+		return child, nil
+	}
+
+	// to continue finding, Node must be a Dir
+	childDir, isDir := child.(Dir)
+	if !isDir {
+		return nil, fmt.Errorf("path is invalid: %s", path)
+	}
+
+	// shift one from front of the path
+	// and continue finding the next Node
+	return childDir.Find(path[1:])
 }
 
 // HasChild returns bool if dir has child of name
@@ -227,27 +339,45 @@ func (d *dir) HasChild(name string) bool {
 	return true
 }
 
-// Find walks the list & returns a final Node or error
-func (d *dir) Find(path []string) (Node, error) {
-	name := path[0]
+func (d *dir) PrettyPrint() map[string]interface{} {
+	m := map[string]interface{}{}
 
-	child, err := d.GetChild(name)
-	if err != nil {
-		return nil, fmt.Errorf("%w; path: %s", err, path)
+	d.nodes.Range(func(key, value interface{}) bool {
+		if d, ok := value.(Dir); ok {
+			m[fmt.Sprint(key)] = d.PrettyPrint()
+		} else if f, ok := value.(File); ok {
+			m[fmt.Sprint(key)] = f.Data()
+		} else {
+			fmt.Println("wtf is this?", value)
+		}
+		return true
+	})
+
+	return m
+}
+
+// PathNotFoundError for errors.Is
+var PathNotFoundError = &pathNotFoundError{}
+
+func NewPathNotFoundError(path []string) *pathNotFoundError {
+	return &pathNotFoundError{
+		path: path,
 	}
+}
 
-	if len(path) == 1 {
-		// we have found the final Node
-		return child, nil
+// pathNotFoundError for restrictive (non-autogenerating path) mode
+type pathNotFoundError struct {
+	path []string
+}
+
+func (e *pathNotFoundError) Error() string {
+	return fmt.Sprintf("path '%s' does not exist", strings.Join(e.path, "/"))
+}
+
+func (e *pathNotFoundError) Is(err error) bool {
+	_, ok := err.(*pathNotFoundError)
+	if !ok {
+		return false
 	}
-
-	// to continue finding Node must be a Dir
-	childDir, isDir := child.(Dir)
-	if !isDir {
-		return nil, fmt.Errorf("path is invalid: %s", path)
-	}
-
-	// shift one from front of the path
-	// and continue finding the next Node
-	return childDir.Find(path[1:])
+	return true
 }

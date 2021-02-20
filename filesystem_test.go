@@ -6,56 +6,85 @@ import (
 	"time"
 )
 
+var expectPrettyPrint string = `{
+  "": {
+    "a": {
+      "b": {
+        "c": {
+          "hello.txt": "World."
+        }
+      }
+    },
+    "foo": {
+      "ahoy": {},
+      "bar": {
+        "baz": {
+          "info.txt": "Satoshi was here. 💖 💖 💖 "
+        }
+      },
+      "zap": {}
+    }
+  }
+}`
+
 func TestFileSystem(t *testing.T) {
-	type test = func(fs FileSystemer) bool
+	type test = func(fs FileSystem) bool
 
 	var tests = func() []test {
 		return []test{
-			func(fs FileSystemer) bool {
+			func(fs FileSystem) bool {
 				err := fs.Mkdir("/foo/bar/baz")
-				return err != nil
+				if err != nil {
+					fmt.Println("got err", err, "expected nil")
+					return false
+				}
+				return true
 			},
-			func(fs FileSystemer) bool {
-				err := fs.Mkdir("/foo")
+			func(fs FileSystem) bool {
+				err := fs.Mkdir("/foo/ahoy")
 				return err == nil
 			},
-			func(fs FileSystemer) bool {
-				err := fs.Mkdir("/foo/bar/baz")
-				return err != nil
-			},
-			func(fs FileSystemer) bool {
-				err := fs.Mkdir("/foo/bar")
+			func(fs FileSystem) bool {
+				err := fs.Mkdir("/foo/zap")
 				return err == nil
 			},
-			func(fs FileSystemer) bool {
-				err := fs.Mkdir("/foo/bar/baz")
-				return err == nil
+			func(fs FileSystem) bool {
+				err := fs.WriteFile("/a/b/c/hello.txt", "World.")
+				if err != nil {
+					fmt.Println("got err", err, "expected nil")
+					return false
+				}
+				return true
 			},
-			func(fs FileSystemer) bool {
-				err := fs.WriteFile("/doesnotexist/info.txt", "Hello.")
-				return err != nil
-			},
-			func(fs FileSystemer) bool {
+			func(fs FileSystem) bool {
 				err := fs.WriteFile("/foo/bar/baz/info.txt", "Satoshi was here.")
 				return err == nil
 			},
-			func(fs FileSystemer) bool {
+			func(fs FileSystem) bool {
 				data, err := fs.ReadFile("/foo/bar/baz/info.txt")
 				if err != nil {
 					return false
 				}
 				return data == "Satoshi was here."
 			},
-			func(fs FileSystemer) bool {
+			func(fs FileSystem) bool {
 				err := fs.WriteFile("/foo/bar/baz/info.txt", " 💖 💖 💖 ")
 				return err == nil
 			},
-			func(fs FileSystemer) bool {
+			func(fs FileSystem) bool {
 				data, err := fs.ReadFile("/foo/bar/baz/info.txt")
 				if err != nil {
 					return false
 				}
 				return data == `Satoshi was here. 💖 💖 💖 `
+			},
+			func(fs FileSystem) bool {
+				content, err := fs.PrettyPrint()
+				if err != nil {
+					panic(err)
+				}
+
+				return content == expectPrettyPrint
 			},
 		}
 	}
@@ -77,13 +106,15 @@ func TestFileSystem(t *testing.T) {
 
 	fmt.Println(time.Since(start))
 
+	fmt.Println(fs.PrettyPrint())
+
 	// @todo convert to test
 	// simulate concurrent read/write requests
 	// nRequest := 1000
 	// var wg sync.WaitGroup
 	// wg.Add(nRequest * 2)
 
-	// go func(fs FileSystemer) {
+	// go func(fs FileSystem) {
 	// 	for i := 0; i < nRequest; i++ {
 	// 		line := fmt.Sprintf("\n+%d", i+1)
 	// 		go func(line string) {
@@ -99,7 +130,7 @@ func TestFileSystem(t *testing.T) {
 	// 	}
 	// }(fs)
 
-	// go func(fs FileSystemer) {
+	// go func(fs FileSystem) {
 	// 	for i := 0; i < nRequest; i++ {
 	// 		go func() {
 	// 			defer wg.Done()
