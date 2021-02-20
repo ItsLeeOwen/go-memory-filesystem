@@ -22,8 +22,8 @@ type Dir interface {
 	CreateDir(name string) (Dir, error)
 	CreateFile(name string, data string) error
 	CreatePath(path []string) (Dir, error)
-	GetChild(name string) (Node, error)
 	Find(path []string) (Node, error)
+	GetChild(name string) (Node, error)
 	HasChild(name string) bool
 	PrettyPrint() map[string]interface{}
 }
@@ -293,18 +293,6 @@ func (d *dir) CreatePath(path []string) (Dir, error) {
 	return childDir.CreatePath(path[1:])
 }
 
-// GetChild returns child by name
-// returns an error if the child does not exist
-func (d *dir) GetChild(name string) (Node, error) {
-	child, exists := d.nodes.Load(name)
-
-	if !exists {
-		return nil, NewPathNotFoundError([]string{name})
-	}
-
-	return child.(Node), nil
-}
-
 // Find walks the Trie & returns a final Node or error
 func (d *dir) Find(path []string) (Node, error) {
 	name := path[0]
@@ -328,6 +316,18 @@ func (d *dir) Find(path []string) (Node, error) {
 	// shift one from front of the path
 	// and continue finding the next Node
 	return childDir.Find(path[1:])
+}
+
+// GetChild returns child by name
+// returns an error if the child does not exist
+func (d *dir) GetChild(name string) (Node, error) {
+	child, exists := d.nodes.Load(name)
+
+	if !exists {
+		return nil, NewPathNotFoundError([]string{name})
+	}
+
+	return child.(Node), nil
 }
 
 // HasChild returns bool if dir has child of name
