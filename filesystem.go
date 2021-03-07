@@ -53,7 +53,7 @@ func NewFileSystem(opts ...fileSystemOption) FileSystem {
 	}
 }
 
-// fileSystem implements FileSystemer
+// fileSystem implements the FileSystem interface
 type fileSystem struct {
 	*dir
 }
